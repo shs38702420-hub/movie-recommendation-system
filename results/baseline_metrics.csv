@@ -1,0 +1,2 @@
+model,RMSE,MAE,Precision@10,Recall@10,NDCG@10,ILD
+SVD_baseline,1.03,0.8214,0.6518,0.4262,0.7823,
