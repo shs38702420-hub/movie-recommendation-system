@@ -17,68 +17,62 @@ st.set_page_config(
 
 # ── 데이터 로드 ────────────────────────────────────────
 @st.cache_data
-def load_data():
-    ratings = pd.read_csv('data/raw/ratings.dat', sep='::',
-                          names=['userId','movieId','rating','timestamp'],
-                          engine='python')
-    movies  = pd.read_csv('data/raw/movies.dat', sep='::',
-                          names=['movieId','title','genres'],
-                          engine='python', encoding='latin-1')
-
-    ratings = ratings.sort_values('timestamp').reset_index(drop=True)
-    split_idx = int(len(ratings) * 0.8)
-    train_df  = ratings.iloc[:split_idx].copy()
-    test_df   = ratings.iloc[split_idx:].copy()
-
-    movies['genre_list'] = movies['genres'].str.split('|')
-    movies['genre_text'] = movies['genre_list'].apply(lambda x: ' '.join(x))
-    movies['year'] = movies['title'].apply(
-        lambda t: int(re.search(r'\((\d{4})\)', t).group(1))
-        if re.search(r'\((\d{4})\)', t) else None
-    )
-    return ratings, train_df, test_df, movies
-
-@st.cache_resource
 def load_models(train_df, movies):
 
-    # CBF
     movie_stats = train_df.groupby('movieId').agg(
         avg_rating=('rating','mean'),
         rating_count=('rating','count')
     ).reset_index()
+
     movies_m = movies.merge(movie_stats, on='movieId', how='left')
-    movies_m['avg_rating']    = movies_m['avg_rating'].fillna(
-        movies_m['avg_rating'].median())
-    movies_m['rating_count']  = movies_m['rating_count'].fillna(0)
-    movies_m['year']          = movies_m['year'].fillna(
-        movies_m['year'].median())
+
+    movies_m['avg_rating'] = movies_m['avg_rating'].fillna(
+        movies_m['avg_rating'].median()
+    )
+    movies_m['rating_count'] = movies_m['rating_count'].fillna(0)
+
+    movies_m['year'] = movies_m['year'].fillna(movies_m['year'].median())
+
     year_min = movies_m['year'].min()
     year_max = movies_m['year'].max()
+
     movies_m['year_norm'] = (movies_m['year'] - year_min) / (year_max - year_min + 1)
-    movies_m['pop_norm']  = np.log1p(movies_m['rating_count'])
-    movies_m['pop_norm']  = movies_m['pop_norm'] / movies_m['pop_norm'].max()
 
-    tfidf    = TfidfVectorizer()
+    movies_m['pop_norm'] = np.log1p(movies_m['rating_count'])
+    movies_m['pop_norm'] = movies_m['pop_norm'] / movies_m['pop_norm'].max()
+
+    tfidf = TfidfVectorizer()
     tfidf_mat = tfidf.fit_transform(movies_m['genre_text'])
-    genre_dense = tfidf_mat.toarray() * 0.80
-    year_vec    = movies_m['year_norm'].values.reshape(-1,1) * 0.15
-    pop_vec     = movies_m['pop_norm'].values.reshape(-1,1) * 0.05
-    features    = np.hstack([genre_dense, year_vec, pop_vec])
-    id_to_idx   = {mid: idx for idx, mid in enumerate(movies_m['movieId'].tolist())}
 
-    # 유저 프로필
+    features = np.hstack([
+        tfidf_mat.toarray() * 0.8,
+        movies_m['year_norm'].values.reshape(-1,1) * 0.15,
+        movies_m['pop_norm'].values.reshape(-1,1) * 0.05
+    ])
+
+    id_to_idx = {
+        mid: idx for idx, mid in enumerate(movies_m['movieId'])
+    }
+
     user_profiles = {}
     for uid, group in train_df.groupby('userId'):
         valid = group[group['movieId'].isin(id_to_idx)]
         if len(valid) == 0:
             continue
+
         idxs = [id_to_idx[m] for m in valid['movieId']]
-        r    = valid['rating'].values
-        w    = r / r.sum()
+        r = valid['rating'].values
+        w = r / r.sum()
+
         user_profiles[uid] = np.dot(w, features[idxs])
 
-    return movies_m, cosine_similarity(features)
+    gm = movies_m['avg_rating'].mean()
 
+    model_A = None  # 아직 SVD 없으면 임시
+
+    return model_A, features, id_to_idx, user_profiles, movies_m, gm
+
+model_A = None
 # ── 추천 함수 ──────────────────────────────────────────
 def recommend_svd(user_id, train_df, model_A, movies_m, n=10):
     seen = set(train_df[train_df['userId']==user_id]['movieId'])
