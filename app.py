@@ -5,7 +5,6 @@ import plotly.express as px
 import plotly.graph_objects as go
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-from surprise import SVD, Dataset, Reader
 import pickle
 import os
 import re
@@ -41,26 +40,6 @@ def load_data():
 
 @st.cache_resource
 def load_models(train_df, movies):
-    reader   = Reader(rating_scale=(1, 5))
-
-    # TemporalSVD
-    t_max    = train_df['timestamp'].max()
-    t_min    = train_df['timestamp'].min()
-    t_half   = (t_max - t_min) / 2
-    weights  = np.exp(-0.1 * (t_max - train_df['timestamp']) / (t_half + 1))
-    w_df     = train_df.copy()
-    w_df['weight'] = weights
-    gm       = w_df['rating'].mean()
-    w_df['rating_adj'] = (
-        w_df['weight'] * w_df['rating'] + (1 - w_df['weight']) * gm
-    )
-    svd_data = Dataset.load_from_df(
-        w_df[['userId','movieId','rating_adj']].rename(
-            columns={'rating_adj':'rating'}), reader
-    )
-    model_A  = SVD(n_factors=60, n_epochs=20, lr_all=0.005,
-                   reg_all=0.02, random_state=42)
-    model_A.fit(svd_data.build_full_trainset())
 
     # CBF
     movie_stats = train_df.groupby('movieId').agg(
@@ -98,7 +77,7 @@ def load_models(train_df, movies):
         w    = r / r.sum()
         user_profiles[uid] = np.dot(w, features[idxs])
 
-    return model_A, features, id_to_idx, user_profiles, movies_m, gm
+    return movies_m, cosine_similarity(features)
 
 # ── 추천 함수 ──────────────────────────────────────────
 def recommend_svd(user_id, train_df, model_A, movies_m, n=10):
