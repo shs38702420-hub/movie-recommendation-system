@@ -29,7 +29,6 @@ referencing==0.37.0
 requests==2.33.1
 rpds-py==0.30.0
 scikit-learn==1.2.2
-scikit-surprise==1.1.4
 scipy==1.10.1
 six==1.17.0
 smmap==5.0.3
